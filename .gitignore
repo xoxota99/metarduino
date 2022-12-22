@@ -30,3 +30,17 @@
 *.exe
 *.out
 *.app
+
+#WIFI credentials (SSID / Password)
+include/credentials.h
+
+#PlatformIO
+.pio/*
+
+#VSCode
+.vscode/c_cpp_properties.json
+.vscode/extensions.json
+.vscode/launch.json
+
+#MacOS
+.DS_Store
