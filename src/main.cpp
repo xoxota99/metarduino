@@ -3,6 +3,9 @@
 #include <ESP8266HTTPClient.h>
 #include <Adafruit_NeoPixel.h>
 #include <ArduinoJson.h>
+#include <map>
+#include "credentials.h"
+#include "airports.h"
 
 #ifndef __CREDENTIALS_H__
 // Define these in include/credentials.h, so they don't get uploaded to github for the world to see.
@@ -11,89 +14,16 @@
 #define SECRET_AVWX_TOKEN "YOUR_AVWX_TOKEN"
 #endif
 
-#define BAUD_RATE 115200
-#define INTERVAL_MILLIS 60000
+#ifndef __AIRPORTS_H__
+char airportMapping[][5] = {
+    "KJFK"};
+#endif
 
-// LED index to ICAO code mapping.
-const char *airportMapping[] = {
-    "CTCK",
-    "CTNK",
-    "CTRA",
-    "CWAJ",
-    "CWCI",
-    "CWCJ",
-    "CWCO",
-    "CWDV",
-    "CWGD",
-    "CWGH",
-    "CWGL",
-    "CWKK",
-    "CWLS",
-    "CWMZ",
-    "CWNC",
-    "CWNZ",
-    "CWPC",
-    "CWQP",
-    "CWRK",
-    "CWWB",
-    "CWWZ",
-    "CXBI",
-    "CXCA",
-    "CXDI",
-    "CXEA",
-    "CXET",
-    "CXHA",
-    "CXHM",
-    "CXKA",
-    "CXKE",
-    "CXKI",
-    "CXPC",
-    "CXTO",
-    "CXVN",
-    "CXZC",
-    "CYAM",
-    "CYAT",
-    "CYCK",
-    "CYER",
-    "CYGK",
-    "CYHD",
-    "CYHM",
-    "CYKF",
-    "CYKP",
-    "CYLD",
-    "CYLH",
-    "CYMO",
-    "CYOO",
-    "CYOW",
-    "CYPO",
-    "CYPQ",
-    "CYQA",
-    "CYQG",
-    "CYQK",
-    "CYQT",
-    "CYRL",
-    "CYSB",
-    "CYSN",
-    "CYSP",
-    "CYTL",
-    "CYTR",
-    "CYTS",
-    "CYTZ",
-    "CYVV",
-    "CYXL",
-    "CYXR",
-    "CYXU",
-    "CYXZ",
-    "CYYB",
-    "CYYU",
-    "CYYW",
-    "CYYZ",
-    "CYZE",
-    "CYZR",
-    "CZEL",
-    "CZMD",
-    "CZSJ",
-    "CZTB"};
+#define BAUD_RATE 115200
+#define INTERVAL_MILLIS 300000 // every five minutes
+
+// JSON Filter doc.
+StaticJsonDocument<200> filter;
 
 #define PIN D2
 #define BRIGHTNESS 50
@@ -103,41 +33,83 @@ Adafruit_NeoPixel pixels(NUM_AIRPORTS, PIN, NEO_GRB + NEO_KHZ800);
 
 int lastUpdate = 0;
 
-enum e_Rule
-{
-    VFR = 0,
-    IFR = 1,
-    MVFR = 2,
-    LIFR = 3,
-    NONE = 4
-};
+std::map<std::string, uint32_t> rulemap = {
+    {"VFR", pixels.Color(0, BRIGHTNESS, 0)},           // green
+    {"IFR", pixels.Color(BRIGHTNESS, 0, 0)},           // red
+    {"MVFR", pixels.Color(0, 0, BRIGHTNESS)},          // blue
+    {"LIFR", pixels.Color(BRIGHTNESS, 0, BRIGHTNESS)}, // magenta
+    {"NONE", 0}};                                      // off
 
-e_Rule resolveRule(char *input)
+uint32_t get_color(const char *input)
 {
-    if (strcmp(input, "VFR"))
+    if (rulemap.find(input) != rulemap.end())
     {
-        return VFR;
+        return rulemap[input];
     }
-    else if (strcmp(input, "IFR"))
+    return 0;
+}
+
+void fetchWeather(char *code, int pixel)
+{
+    // Example URL (for CYYZ): http://avwx.rest/api/metar/CYYZ?format=json&onfail=cache&token=MY_TOKEN
+    if (WiFi.status() == WL_CONNECTED)
     {
-        return IFR;
-    }
-    else if (strcmp(input, "MVFR"))
-    {
-        return MVFR;
-    }
-    else if (strcmp(input, "LIFR"))
-    {
-        return LIFR;
-    }
-    else
-    {
-        return NONE;
+        WiFiClient client;
+        HTTPClient http;
+        String icao = code;
+        String url = "http://avwx.rest/api/metar/" + icao + "?format=json&onfail=cache&token=" + SECRET_AVWX_TOKEN;
+
+        // fetch the API Response
+        http.begin(client, url);
+        int httpResponseCode = http.GET();
+        uint32_t c = 0;
+
+        if (httpResponseCode > 0)
+        {
+            String json = http.getString();
+            // Serial.println(json);
+
+            // parse the JSON
+            DynamicJsonDocument doc(1024);
+            DeserializationError error = deserializeJson(doc, json, DeserializationOption::Filter(filter));
+            if (error)
+            {
+                Serial.print(F("deserializeJson() failed: "));
+                Serial.println(error.f_str());
+            }
+            else
+            {
+                // Print the result
+                // serializeJsonPretty(doc, Serial);
+
+                const char *flight_rules = doc["flight_rules"];
+                Serial.printf("%s:%s\n", code, flight_rules);
+                // Serial.println();
+
+                // Get appropriate color for the flight rule.
+                c = get_color(flight_rules);
+            }
+        }
+        else
+        {
+            Serial.print("Error code: ");
+            Serial.println(httpResponseCode);
+        }
+        http.end();
+
+        // Set the pixel to the color
+        pixels.setPixelColor(pixel, c);
+
+        pixels.show(); // Send the updated pixel colors to the hardware.
     }
 }
 
 void setup()
 {
+    // initialize JSON filter
+
+    filter["flight_rules"] = true;
+
     // run once.
     Serial.begin(BAUD_RATE);
     WiFi.begin(SECRET_SSID, SECRET_PASS);
@@ -156,56 +128,27 @@ void setup()
     pinMode(LED_BUILTIN, OUTPUT);
 }
 
-void fetchWeather(const char *code, int pixel)
-{
-    // Example URL (for CYYZ): http://avwx.rest/api/metar/CYYZ?format=json&onfail=cache&token=MY_TOKEN
-
-    HTTPClient http;
-    String icao = code;
-    String url = "http://avwx.rest/api/metar/" + icao + "?format=json&onfail=cache&token=" + SECRET_AVWX_TOKEN;
-
-    http.begin(url);
-    int httpCode = http.GET();
-    String json = http.getString();
-    Serial.println(json);
-    http.end();
-
-    DynamicJsonDocument doc(1024);
-
-    DeserializationError error = deserializeJson(doc, json);
-    if (error)
-    {
-        Serial.print(F("deserializeJson() failed: "));
-        Serial.println(error.f_str());
-
-        // Set the pixel to OFF.
-
-        return;
-    }
-
-    char *flight_rules = doc["flight_rules"];
-
-    Serial.printf("%s:%s", code, flight_rules);
-
-    // Convert flight rule string to enum
-    e_Rule rule = resolveRule(flight_rules);
-
-    // Get appropriate color for the flight rule.
-
-    // Set the pixel to the color
-}
-
 void loop()
 {
     unsigned long t = millis();
-    if (t - lastUpdate > INTERVAL_MILLIS)
+    if (t - lastUpdate > INTERVAL_MILLIS || lastUpdate == 0)
     {
-        // update the LED
-        for (uint16_t i = 0; i < NUM_AIRPORTS; i++)
+        if (WiFi.status() == WL_CONNECTED)
         {
-            fetchWeather(airportMapping[i], i);
-            delay(1000);
+            // update the LED
+            for (uint16_t i = 0; i < NUM_AIRPORTS; i++)
+            {
+                // digitalWrite(LED_BUILTIN, HIGH);
+                fetchWeather(airportMapping[i], i);
+                digitalWrite(LED_BUILTIN, LOW);
+                delay(10);
+            }
+            lastUpdate = millis();
         }
-        lastUpdate = millis();
+        else
+        {
+            Serial.println("WiFi disconnected.");
+            lastUpdate = millis();
+        }
     }
 }
