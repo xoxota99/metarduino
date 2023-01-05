@@ -15,6 +15,7 @@
 #endif
 
 #ifndef __AIRPORTS_H__
+// Define these in include/airports.h, so they're specific to your setup.
 char airportMapping[][5] = {
     "KJFK"};
 #endif
@@ -26,29 +27,38 @@ char airportMapping[][5] = {
 StaticJsonDocument<200> filter;
 
 #define PIN D2
-#define BRIGHTNESS 50
 #define NUM_AIRPORTS (sizeof airportMapping / sizeof airportMapping[0])
 
 Adafruit_NeoPixel pixels(NUM_AIRPORTS, PIN, NEO_GRB + NEO_KHZ800);
 
 int lastUpdate = 0;
 
+int led_brightness = 50;
+
 std::map<std::string, uint32_t> rulemap = {
-    {"VFR", pixels.Color(0, BRIGHTNESS, 0)},           // green
-    {"IFR", pixels.Color(BRIGHTNESS, 0, 0)},           // red
-    {"MVFR", pixels.Color(0, 0, BRIGHTNESS)},          // blue
-    {"LIFR", pixels.Color(BRIGHTNESS, 0, BRIGHTNESS)}, // magenta
-    {"NONE", 0}};                                      // off
+    {"VFR", pixels.Color(0, led_brightness, 0)},               // green
+    {"IFR", pixels.Color(led_brightness, 0, 0)},               // red
+    {"MVFR", pixels.Color(0, 0, led_brightness)},              // blue
+    {"LIFR", pixels.Color(led_brightness, 0, led_brightness)}, // magenta
+    {"NONE", 0}};                                              // off
 
-uint32_t get_color(const char *input)
+/**
+ * A lightweight wrapper around the rules -> color map, that will return the "NONE" value for an unsupported flight rule.
+ * @param flight_rule - A string representing an FAA flight rule. One of: "VFR", "IFR", "MVFR", "LIFR", or the special value, "NONE".
+ * @return a NeoPixel color (as uint32_t)
+ */
+uint32_t get_color(const char *flight_rule)
 {
-    if (rulemap.find(input) != rulemap.end())
+    uint32_t retval = rulemap["NONE"];
+    if (rulemap.find(flight_rule) != rulemap.end())
     {
-        return rulemap[input];
+        retval = rulemap[flight_rule];
     }
-    return 0;
+    return retval;
 }
-
+/**
+ * Fetch the weather for a given ICAO airport code from AVWX, and set the relevant NeoPixel index to the correct color.
+ */
 void fetchWeather(char *code, int pixel)
 {
     // Example URL (for CYYZ): http://avwx.rest/api/metar/CYYZ?format=json&onfail=cache&token=MY_TOKEN
@@ -62,7 +72,7 @@ void fetchWeather(char *code, int pixel)
         // fetch the API Response
         http.begin(client, url);
         int httpResponseCode = http.GET();
-        uint32_t c = 0;
+        uint32_t rgb = 0; // RGB color for NeoPixel
 
         if (httpResponseCode > 0)
         {
@@ -87,7 +97,7 @@ void fetchWeather(char *code, int pixel)
                 // Serial.println();
 
                 // Get appropriate color for the flight rule.
-                c = get_color(flight_rules);
+                rgb = get_color(flight_rules);
             }
         }
         else
@@ -98,7 +108,7 @@ void fetchWeather(char *code, int pixel)
         http.end();
 
         // Set the pixel to the color
-        pixels.setPixelColor(pixel, c);
+        pixels.setPixelColor(pixel, rgb);
 
         pixels.show(); // Send the updated pixel colors to the hardware.
     }
@@ -110,10 +120,11 @@ void setup()
 
     filter["flight_rules"] = true;
 
-    // run once.
+    // Initialize Serial.
     Serial.begin(BAUD_RATE);
-    WiFi.begin(SECRET_SSID, SECRET_PASS);
 
+    // Initialize Wifi
+    WiFi.begin(SECRET_SSID, SECRET_PASS);
     Serial.println();
     Serial.print("Connecting");
     while (WiFi.status() != WL_CONNECTED)
@@ -125,6 +136,8 @@ void setup()
     Serial.println("success!");
     Serial.print("IP Address is: ");
     Serial.println(WiFi.localIP());
+
+    // Initialize Indicator LED
     pinMode(LED_BUILTIN, OUTPUT);
 }
 
@@ -143,6 +156,7 @@ void loop()
                 digitalWrite(LED_BUILTIN, LOW);
                 delay(10);
             }
+            Serial.println("=========");
             lastUpdate = millis();
         }
         else
