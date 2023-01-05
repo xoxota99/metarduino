@@ -34,6 +34,9 @@
 #WIFI credentials (SSID / Password)
 include/credentials.h
 
+#Your specific Airports
+include/airports.h
+
 #PlatformIO
 .pio/*
 
