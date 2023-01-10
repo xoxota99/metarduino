@@ -139,10 +139,13 @@ void refresh()
 {
     for (std::map<std::string, airport_t>::iterator it = airportMapping.begin(); it != airportMapping.end(); it++)
     {
-        uint32_t c = get_color(it->second.flight_rules);
-        int ledidx = it->second.led_index;
+        uint32_t rgb = get_color(it->second.flight_rules);
+        int pixel = it->second.led_index;
 
-        // Set the LED at idx to color c.
+        // Set the pixel to the color
+        pixels.setPixelColor(pixel, rgb);
+
+        pixels.show(); // Send the updated pixel colors to the hardware.
     }
 }
 
